@@ -1,0 +1,15 @@
+{
+	"name": "NovaMart-DF",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "4698901e-a49a-40f1-9775-9b4bd2da7707",
+		"tenantId": "bb0a48bc-1321-4da3-b395-316fecc0f7ae"
+	}
+}

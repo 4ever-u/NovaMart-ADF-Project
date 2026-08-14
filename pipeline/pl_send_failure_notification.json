@@ -1,0 +1,91 @@
+{
+	"name": "pl_send_failure_notification",
+	"properties": {
+		"activities": [
+			{
+				"name": "Lookup email recipients",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "ds_sql_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"table_name": "EmailRecipient"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEachEmail",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Lookup email recipients",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Lookup email recipients').output.value",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "CallLogicApp",
+							"type": "WebActivity",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"headers": {
+									"Content-Type": "application/json"
+								},
+								"url": "https://prod-59.eastus.logic.azure.com:443/workflows/e65ae564ebd148129288cfc90d55c770/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=vLX8D2_2o0G5t-HAD3s-AWGim2F45LMV6CI8Ds4QBog",
+								"body": {
+									"value": "{\n       \"emailAddress\": \"@{item().EmailAddress}\",\n       \"subject\": \"@{pipeline().parameters.subject}\",\n       \"messageBody\": \"@{pipeline().parameters.messageBody}\"\n}",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"subject": {
+				"type": "string"
+			},
+			"messageBody": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-08-13T12:15:35Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

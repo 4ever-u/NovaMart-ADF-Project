@@ -1,0 +1,25 @@
+{
+	"name": "tr_event_sales",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "pl_sales_ingest_daily",
+					"type": "PipelineReference"
+				}
+			}
+		],
+		"type": "BlobEventsTrigger",
+		"typeProperties": {
+			"blobPathBeginsWith": "/landing/blobs/source_data/partner_drops/daily_sales/sales",
+			"blobPathEndsWith": ".csv",
+			"ignoreEmptyBlobs": false,
+			"scope": "/subscriptions/c63d6a12-dfc6-4856-8746-f0201ee77132/resourceGroups/rg-novamart-dev/providers/Microsoft.Storage/storageAccounts/novamartadlss",
+			"events": [
+				"Microsoft.Storage.BlobCreated"
+			]
+		}
+	}
+}

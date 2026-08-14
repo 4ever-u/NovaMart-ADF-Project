@@ -1,0 +1,255 @@
+{
+	"name": "df_scd_customer",
+	"properties": {
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "ds_csv_new_customers",
+						"type": "DatasetReference"
+					},
+					"name": "NewCustomersCSV"
+				},
+				{
+					"dataset": {
+						"referenceName": "ds_sql_dimcustomer",
+						"type": "DatasetReference"
+					},
+					"name": "OldCustomersTable"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "ds_sql_dimcustomer",
+						"type": "DatasetReference"
+					},
+					"name": "AddingNewCustomers"
+				},
+				{
+					"dataset": {
+						"referenceName": "ds_sql_dimcustomer",
+						"type": "DatasetReference"
+					},
+					"name": "DimCustomerUpdatedRows"
+				},
+				{
+					"dataset": {
+						"referenceName": "ds_sql_dimcustomer",
+						"type": "DatasetReference"
+					},
+					"name": "DimCustomerOldRow"
+				}
+			],
+			"transformations": [
+				{
+					"name": "CheckIfNew"
+				},
+				{
+					"name": "AddNewColumns"
+				},
+				{
+					"name": "JoinExisting"
+				},
+				{
+					"name": "FlagChanges"
+				},
+				{
+					"name": "SplitChanged"
+				},
+				{
+					"name": "NewVersionRow"
+				},
+				{
+					"name": "SelectUpdatedColumns"
+				},
+				{
+					"name": "CloseOldRow"
+				},
+				{
+					"name": "MarkAsUpdate"
+				},
+				{
+					"name": "SelectOldColumns"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          CustomerID as integer,",
+				"          FirstName as string,",
+				"          LastName as string,",
+				"          Email as string,",
+				"          City as string,",
+				"          LoyaltyTier as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     ignoreNoFilesFound: false) ~> NewCustomersCSV",
+				"source(output(",
+				"          CustomerSK as integer,",
+				"          CustomerID as integer,",
+				"          FirstName as string,",
+				"          LastName as string,",
+				"          Email as string,",
+				"          City as string,",
+				"          LoyaltyTier as string,",
+				"          IsCurrent as boolean,",
+				"          EffectiveFrom as timestamp,",
+				"          EffectiveTo as timestamp",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> OldCustomersTable",
+				"NewCustomersCSV, OldCustomersTable exists(NewCustomersCSV@CustomerID == OldCustomersTable@CustomerID,",
+				"     negate:true,",
+				"     broadcast: 'auto')~> CheckIfNew",
+				"CheckIfNew derive(IsCurrent = true(),",
+				"          EffectiveFrom = currentUTC()) ~> AddNewColumns",
+				"NewCustomersCSV, OldCustomersTable join(NewCustomersCSV@CustomerID == OldCustomersTable@CustomerID,",
+				"     joinType:'inner',",
+				"     matchType:'exact',",
+				"     ignoreSpaces: false,",
+				"     broadcast: 'auto')~> JoinExisting",
+				"JoinExisting derive({_hasChanged} = iif((NewCustomersCSV@Email != OldCustomersTable@Email || NewCustomersCSV@City != OldCustomersTable@City || NewCustomersCSV@LoyaltyTier != OldCustomersTable@LoyaltyTier), true(), false())) ~> FlagChanges",
+				"FlagChanges split({_hasChanged} == true(),",
+				"     disjoint: false) ~> SplitChanged@(Changed, Unchanged)",
+				"SplitChanged@Changed derive(IsCurrent = true(),",
+				"          EffectiveFrom = currentUTC()) ~> NewVersionRow",
+				"NewVersionRow select(mapColumn(",
+				"          CustomerID = SplitChanged@Changed@CustomerID,",
+				"          FirstName = SplitChanged@Changed@FirstName,",
+				"          LastName = SplitChanged@Changed@LastName,",
+				"          Email = SplitChanged@Changed@Email,",
+				"          City = SplitChanged@Changed@City,",
+				"          LoyaltyTier = SplitChanged@Changed@LoyaltyTier,",
+				"          IsCurrent,",
+				"          EffectiveFrom,",
+				"          EffectiveTo,",
+				"          {_hasChanged}",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> SelectUpdatedColumns",
+				"SplitChanged@Changed derive(IsCurrent = false(),",
+				"          EffectiveTo = currentUTC()) ~> CloseOldRow",
+				"CloseOldRow alterRow(updateIf(true())) ~> MarkAsUpdate",
+				"MarkAsUpdate select(mapColumn(",
+				"          CustomerSK,",
+				"          CustomerID = SplitChanged@Changed@CustomerID,",
+				"          FirstName = SplitChanged@Changed@FirstName,",
+				"          LastName = SplitChanged@Changed@LastName,",
+				"          Email = SplitChanged@Changed@Email,",
+				"          City = SplitChanged@Changed@City,",
+				"          LoyaltyTier = SplitChanged@Changed@LoyaltyTier,",
+				"          IsCurrent,",
+				"          EffectiveFrom,",
+				"          EffectiveTo,",
+				"          {_hasChanged}",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> SelectOldColumns",
+				"AddNewColumns sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          CustomerSK as integer,",
+				"          CustomerID as integer,",
+				"          FirstName as string,",
+				"          LastName as string,",
+				"          Email as string,",
+				"          City as string,",
+				"          LoyaltyTier as string,",
+				"          IsCurrent as boolean,",
+				"          EffectiveFrom as timestamp,",
+				"          EffectiveTo as timestamp",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          CustomerID,",
+				"          FirstName,",
+				"          LastName,",
+				"          Email,",
+				"          City,",
+				"          LoyaltyTier,",
+				"          IsCurrent,",
+				"          EffectiveFrom",
+				"     )) ~> AddingNewCustomers",
+				"SelectUpdatedColumns sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          CustomerSK as integer,",
+				"          CustomerID as integer,",
+				"          FirstName as string,",
+				"          LastName as string,",
+				"          Email as string,",
+				"          City as string,",
+				"          LoyaltyTier as string,",
+				"          IsCurrent as boolean,",
+				"          EffectiveFrom as timestamp,",
+				"          EffectiveTo as timestamp",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          CustomerID,",
+				"          FirstName,",
+				"          LastName,",
+				"          Email,",
+				"          City,",
+				"          LoyaltyTier,",
+				"          IsCurrent,",
+				"          EffectiveFrom,",
+				"          EffectiveTo",
+				"     )) ~> DimCustomerUpdatedRows",
+				"SelectOldColumns sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          CustomerSK as integer,",
+				"          CustomerID as integer,",
+				"          FirstName as string,",
+				"          LastName as string,",
+				"          Email as string,",
+				"          City as string,",
+				"          LoyaltyTier as string,",
+				"          IsCurrent as boolean,",
+				"          EffectiveFrom as timestamp,",
+				"          EffectiveTo as timestamp",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:false,",
+				"     updateable:true,",
+				"     upsertable:false,",
+				"     keys:['CustomerSK'],",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          CustomerSK,",
+				"          CustomerID,",
+				"          FirstName,",
+				"          LastName,",
+				"          Email,",
+				"          City,",
+				"          LoyaltyTier,",
+				"          IsCurrent,",
+				"          EffectiveFrom,",
+				"          EffectiveTo",
+				"     )) ~> DimCustomerOldRow"
+			]
+		}
+	}
+}

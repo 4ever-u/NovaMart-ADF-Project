@@ -1,0 +1,65 @@
+{
+	"name": "ds_json_products",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "LS_DataLakeStorage",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "Json",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobFSLocation",
+				"fileName": "product_catalog.json",
+				"folderPath": "source_data/partner_drops/products",
+				"fileSystem": "landing"
+			}
+		},
+		"schema": {
+			"type": "object",
+			"properties": {
+				"generatedDate": {
+					"type": "string"
+				},
+				"source": {
+					"type": "string"
+				},
+				"products": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"sku": {
+								"type": "string"
+							},
+							"productName": {
+								"type": "string"
+							},
+							"category": {
+								"type": "string"
+							},
+							"listPrice": {
+								"type": "number"
+							},
+							"attributes": {
+								"type": "object",
+								"properties": {
+									"brand": {
+										"type": "string"
+									},
+									"active": {
+										"type": "boolean"
+									},
+									"weightKg": {
+										"type": "number"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

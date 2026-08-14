@@ -1,0 +1,733 @@
+{
+	"name": "pl_sales_ingest_daily",
+	"properties": {
+		"activities": [
+			{
+				"name": "Get daily_sales files",
+				"type": "GetMetadata",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"dataset": {
+						"referenceName": "ds_csv_generic",
+						"type": "DatasetReference",
+						"parameters": {
+							"container": "landing",
+							"folder": "source_data/partner_drops/daily_sales",
+							"file": "*"
+						}
+					},
+					"fieldList": [
+						"childItems"
+					],
+					"storeSettings": {
+						"type": "AzureBlobFSReadSettings",
+						"recursive": true,
+						"enablePartitionDiscovery": false
+					},
+					"formatSettings": {
+						"type": "DelimitedTextReadSettings"
+					}
+				}
+			},
+			{
+				"name": "Lookup LogPipelineStart",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Get daily_sales files",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderStoredProcedureName": "[dbo].[LogPipelineStart]",
+						"storedProcedureParameters": {
+							"Comments": {
+								"type": "String",
+								"value": "very good"
+							},
+							"PipelineName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().Pipeline",
+									"type": "Expression"
+								}
+							},
+							"PipelineRunId": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().RunId",
+									"type": "Expression"
+								}
+							}
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "ds_sql_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"table_name": "FactSales"
+						}
+					}
+				}
+			},
+			{
+				"name": "Filter CSV files",
+				"type": "Filter",
+				"dependsOn": [
+					{
+						"activity": "Get daily_sales files",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Get daily_sales files').output.childItems",
+						"type": "Expression"
+					},
+					"condition": {
+						"value": "@endswith(item().name, '.csv')",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Set RunSeqNo",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "Lookup LogPipelineStart",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "RunSeqNo",
+					"value": {
+						"value": "@activity('Lookup LogPipelineStart').output.firstRow.RunSeqNo",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "ForEachFile",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Filter CSV files",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Set RunSeqNo",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Lookup Watermark table",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Filter CSV files').output.Value",
+						"type": "Expression"
+					},
+					"isSequential": true,
+					"activities": [
+						{
+							"name": "Incremental Load",
+							"type": "IfCondition",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@greater(\n  ticks(concat(substring(item().name,6,4),'-',substring(item().name,10,2),'-',substring(item().name,12,2),'T00:00:00.0000000')),\n  ticks(activity('Lookup Watermark table').output.firstRow.WatermarkValue)\n)",
+									"type": "Expression"
+								},
+								"ifFalseActivities": [
+									{
+										"name": "Wait a second",
+										"type": "Wait",
+										"dependsOn": [],
+										"userProperties": [],
+										"typeProperties": {
+											"waitTimeInSeconds": 1
+										}
+									}
+								],
+								"ifTrueActivities": [
+									{
+										"name": "Copy files to FactSales SQL table",
+										"type": "Copy",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [
+											{
+												"name": "Source",
+												"value": "@{'landing'}/@{'source_data/partner_drops/daily_sales'}/@{item().name}"
+											},
+											{
+												"name": "Destination",
+												"value": "dbo.@{'FactSales'}"
+											}
+										],
+										"typeProperties": {
+											"source": {
+												"type": "DelimitedTextSource",
+												"additionalColumns": [
+													{
+														"name": "SourceFileName",
+														"value": {
+															"value": "@item().name",
+															"type": "Expression"
+														}
+													},
+													{
+														"name": "PipelineRunId",
+														"value": {
+															"value": "@pipeline().RunId",
+															"type": "Expression"
+														}
+													},
+													{
+														"name": "RunSeqNo",
+														"value": {
+															"value": "@variables('RunSeqNo')",
+															"type": "Expression"
+														}
+													},
+													{
+														"name": "LoadedAt",
+														"value": {
+															"value": "@utcNow()",
+															"type": "Expression"
+														}
+													}
+												],
+												"storeSettings": {
+													"type": "AzureBlobFSReadSettings",
+													"recursive": true,
+													"enablePartitionDiscovery": false
+												},
+												"formatSettings": {
+													"type": "DelimitedTextReadSettings"
+												}
+											},
+											"sink": {
+												"type": "AzureSqlSink",
+												"writeBehavior": "upsert",
+												"upsertSettings": {
+													"useTempDB": true,
+													"keys": [
+														"OrderID"
+													]
+												},
+												"sqlWriterUseTableLock": false,
+												"disableMetricsCollection": false
+											},
+											"enableStaging": false,
+											"translator": {
+												"type": "TabularTranslator",
+												"typeConversion": true,
+												"typeConversionSettings": {
+													"allowDataTruncation": true,
+													"treatBooleanAsNumber": false
+												}
+											}
+										},
+										"inputs": [
+											{
+												"referenceName": "ds_csv_generic",
+												"type": "DatasetReference",
+												"parameters": {
+													"container": "landing",
+													"folder": "source_data/partner_drops/daily_sales",
+													"file": {
+														"value": "@item().name",
+														"type": "Expression"
+													}
+												}
+											}
+										],
+										"outputs": [
+											{
+												"referenceName": "ds_sql_table",
+												"type": "DatasetReference",
+												"parameters": {
+													"table_name": "FactSales"
+												}
+											}
+										]
+									},
+									{
+										"name": "Set RowsCopied",
+										"type": "SetVariable",
+										"dependsOn": [
+											{
+												"activity": "Copy files to FactSales SQL table",
+												"dependencyConditions": [
+													"Completed"
+												]
+											}
+										],
+										"policy": {
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "RowsCopied",
+											"value": {
+												"value": "@add(variables('TotalRowsCopied'), activity('Copy files to FactSales SQL table').output.rowsCopied)",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Set TotalRowsCopied",
+										"type": "SetVariable",
+										"dependsOn": [
+											{
+												"activity": "Set RowsCopied",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "TotalRowsCopied",
+											"value": {
+												"value": "@variables('RowsCopied')",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Set RowsRead",
+										"type": "SetVariable",
+										"dependsOn": [
+											{
+												"activity": "Copy files to FactSales SQL table",
+												"dependencyConditions": [
+													"Completed"
+												]
+											}
+										],
+										"policy": {
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "RowsRead",
+											"value": {
+												"value": "@add(variables('TotalRowsRead'), activity('Copy files to FactSales SQL table').output.rowsRead)",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Set TotalRowsRead",
+										"type": "SetVariable",
+										"dependsOn": [
+											{
+												"activity": "Set RowsRead",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "TotalRowsRead",
+											"value": {
+												"value": "@variables('RowsRead')",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Set watermark value",
+										"type": "SetVariable",
+										"dependsOn": [
+											{
+												"activity": "Copy files to FactSales SQL table",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "WatermarkValue",
+											"value": {
+												"value": "@concat(substring(item().name,6,4),'-',substring(item().name,10,2),'-',substring(item().name,12,2),'T00:00:00.0000000')",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Update on failure",
+										"type": "SqlServerStoredProcedure",
+										"dependsOn": [
+											{
+												"activity": "Copy files to FactSales SQL table",
+												"dependencyConditions": [
+													"Failed"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"storedProcedureName": "[dbo].[InsertLoadingError]",
+											"storedProcedureParameters": {
+												"ActivityName": {
+													"value": "Copy files to FactSales SQL table",
+													"type": "String"
+												},
+												"ErrorMessage": {
+													"value": {
+														"value": "@activity('Copy files to FactSales SQL table').error.message",
+														"type": "Expression"
+													},
+													"type": "String"
+												},
+												"PipelineName": {
+													"value": {
+														"value": "@pipeline().Pipeline",
+														"type": "Expression"
+													},
+													"type": "String"
+												},
+												"PipelineRunId": {
+													"value": {
+														"value": "@pipeline().RunId",
+														"type": "Expression"
+													},
+													"type": "String"
+												}
+											}
+										},
+										"linkedServiceName": {
+											"referenceName": "LS_AzureSQL",
+											"type": "LinkedServiceReference"
+										}
+									},
+									{
+										"name": "NotifyOnFailure",
+										"type": "ExecutePipeline",
+										"dependsOn": [
+											{
+												"activity": "Update on failure",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"pipeline": {
+												"referenceName": "pl_send_failure_notification",
+												"type": "PipelineReference"
+											},
+											"waitOnCompletion": true,
+											"parameters": {
+												"subject": {
+													"value": "@concat('ADF pipeline failure: ', pipeline().Pipeline)",
+													"type": "Expression"
+												},
+												"messageBody": {
+													"value": "@concat('Activity failed: Copy files to FactSales SQL table | Error: ', activity('Copy files to FactSales SQL table').error.message)",
+													"type": "Expression"
+												}
+											}
+										}
+									}
+								]
+							}
+						},
+						{
+							"name": "Update watermark table",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "Incremental Load",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[UpdateWatermark]",
+								"storedProcedureParameters": {
+									"NewValue": {
+										"value": {
+											"value": "@variables('WatermarkValue')",
+											"type": "Expression"
+										},
+										"type": "DateTime"
+									},
+									"TableName": {
+										"value": "FactSales",
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "LS_AzureSQL",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Update LogPipelineEnd on success",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "ForEachFile",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[LogPipelineEnd]",
+					"storedProcedureParameters": {
+						"FilesRead": {
+							"value": {
+								"value": "@activity('Filter CSV files').output.ItemsCount",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"RowsCopied": {
+							"value": {
+								"value": "@variables('TotalRowsCopied')",
+								"type": "Expression"
+							},
+							"type": "Int64"
+						},
+						"RowsRead": {
+							"value": {
+								"value": "@variables('TotalRowsRead')",
+								"type": "Expression"
+							},
+							"type": "Int64"
+						},
+						"RunSeqNo": {
+							"value": {
+								"value": "@variables('RunSeqNo')",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"Status": {
+							"value": "Success",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "LS_AzureSQL",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Lookup Watermark table",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "ds_sql_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"table_name": "LoadWatermark"
+						}
+					}
+				}
+			},
+			{
+				"name": "Update LogPipelineEnd on failure",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "ForEachFile",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[LogPipelineEnd]",
+					"storedProcedureParameters": {
+						"FilesRead": {
+							"value": {
+								"value": "@activity('Filter CSV files').output.ItemsCount",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"RowsCopied": {
+							"value": {
+								"value": "@variables('TotalRowsCopied')",
+								"type": "Expression"
+							},
+							"type": "Int64"
+						},
+						"RowsRead": {
+							"value": {
+								"value": "@variables('TotalRowsRead')",
+								"type": "Expression"
+							},
+							"type": "Int64"
+						},
+						"RunSeqNo": {
+							"value": {
+								"value": "@variables('RunSeqNo')",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"Status": {
+							"value": "Failed",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "LS_AzureSQL",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"variables": {
+			"RowsCopied": {
+				"type": "Integer"
+			},
+			"TotalRowsCopied": {
+				"type": "Integer"
+			},
+			"RowsRead": {
+				"type": "Integer"
+			},
+			"TotalRowsRead": {
+				"type": "Integer"
+			},
+			"RunSeqNo": {
+				"type": "Integer"
+			},
+			"WatermarkValue": {
+				"type": "String"
+			}
+		},
+		"annotations": [
+			"NovaMart_DailyIngestion"
+		],
+		"lastPublishTime": "2026-08-14T09:18:15Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
