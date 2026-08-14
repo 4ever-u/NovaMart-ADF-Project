@@ -1,0 +1,27 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "value": "NovaMart-DF"
+        },
+        "LS_AzureSQL_properties_typeProperties_server": {
+            "value": "novamart-sql-server.database.windows.net"
+        },
+        "LS_AzureSQL_properties_typeProperties_database": {
+            "value": "NovaMart"
+        },
+        "LS_AzureSQL_properties_typeProperties_userName": {
+            "value": "novamart"
+        },
+        "LS_DataLakeStorage_properties_typeProperties_url": {
+            "value": "https://novamartadlss.dfs.core.windows.net/"
+        },
+        "LS_KeyVault_properties_typeProperties_baseUrl": {
+            "value": "https://NovaMart-KeyVault1.vault.azure.net/"
+        },
+        "tr_event_sales_properties_typeProperties_scope": {
+            "value": "/subscriptions/c63d6a12-dfc6-4856-8746-f0201ee77132/resourceGroups/rg-novamart-dev/providers/Microsoft.Storage/storageAccounts/novamartadlss"
+        }
+    }
+}
